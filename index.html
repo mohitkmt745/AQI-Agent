@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>AirAction — AI Air Quality Dashboard</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<style>
+/* ── Reset & Base ──────────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;
+  --text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--accent2:#3fb950;
+  --good:#00e676;--satisfactory:#ffee58;--moderate:#ffa726;
+  --poor:#ef5350;--verypoor:#ab47bc;--severe:#c62828;
+  --radius:12px;--shadow:0 4px 24px rgba(0,0,0,.45);
+}
+html{scroll-behavior:smooth}
+body{font-family:-apple-system,"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.6}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────── */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--surface)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+/* ── Header ────────────────────────────────────────────────────────────── */
+header{background:linear-gradient(135deg,#0d1117 0%,#161b22 100%);border-bottom:1px solid var(--border);padding:0 32px;display:flex;align-items:center;justify-content:space-between;height:64px;position:sticky;top:0;z-index:100;backdrop-filter:blur(8px)}
+.header-brand{display:flex;align-items:center;gap:12px}
+.header-brand img{height:28px;filter:brightness(0) invert(1)}
+.header-brand h1{font-size:20px;font-weight:700;background:linear-gradient(90deg,#58a6ff,#3fb950);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.header-brand span{font-size:11px;color:var(--muted);margin-left:4px;background:none;-webkit-text-fill-color:var(--muted)}
+.live-badge{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--accent2);background:#1a2d1a;border:1px solid #2d5a2d;padding:4px 12px;border-radius:20px}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--accent2);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}
+
+/* ── Controls bar ──────────────────────────────────────────────────────── */
+.controls{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 32px;display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end}
+.ctrl-group{display:flex;flex-direction:column;gap:6px}
+.ctrl-group label{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
+select,input[type=text]{background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;cursor:pointer;outline:none;transition:border-color .2s}
+select:focus,input[type=text]:focus{border-color:var(--accent)}
+.radio-pills{display:flex;gap:6px}
+.radio-pills label{padding:6px 14px;border-radius:20px;border:1px solid var(--border);cursor:pointer;font-size:12px;font-weight:600;transition:all .2s;white-space:nowrap}
+.radio-pills input{display:none}
+.radio-pills input:checked+span{background:var(--accent);color:#0d1117;border-color:var(--accent)}
+.radio-pills label:has(input:checked){background:var(--accent);color:#0d1117;border-color:var(--accent)}
+.btn-analyze{padding:10px 24px;background:linear-gradient(135deg,#1f6feb,#388bfd);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:transform .15s,box-shadow .15s;white-space:nowrap}
+.btn-analyze:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(88,166,255,.4)}
+.btn-analyze:active{transform:translateY(0)}
+
+/* ── Main grid ─────────────────────────────────────────────────────────── */
+.page{padding:24px 32px;display:grid;gap:20px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px}
+.grid-13{display:grid;grid-template-columns:1fr 2fr;gap:20px}
+@media(max-width:1100px){.grid-3,.grid-13{grid-template-columns:1fr 1fr}}
+@media(max-width:720px){.grid-2,.grid-3,.grid-13{grid-template-columns:1fr}}
+
+/* ── Cards ─────────────────────────────────────────────────────────────── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow);transition:border-color .2s}
+.card:hover{border-color:#444c56}
+.card-title{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.card-title svg{opacity:.7}
+
+/* ── AQI Meter (CSS arc) ───────────────────────────────────────────────── */
+.aqi-meter-wrap{display:flex;flex-direction:column;align-items:center;gap:12px;padding:8px 0}
+.aqi-arc-container{position:relative;width:200px;height:110px;overflow:hidden}
+.aqi-arc-bg,.aqi-arc-fill{position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:200px;height:200px;border-radius:50%;border:18px solid transparent}
+.aqi-arc-bg{border-top-color:#21262d;border-right-color:#21262d;border-left-color:#21262d;transform:translateX(-50%) rotate(0deg)}
+.aqi-arc-fill{transition:all .8s cubic-bezier(.34,1.56,.64,1);transform-origin:center bottom}
+.aqi-value{font-size:52px;font-weight:800;line-height:1;letter-spacing:-2px}
+.aqi-cat{font-size:16px;font-weight:700;margin-top:2px}
+.aqi-city{font-size:12px;color:var(--muted)}
+
+/* ── Stat tiles ─────────────────────────────────────────────────────────── */
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.stat{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center;transition:transform .15s,border-color .2s}
+.stat:hover{transform:translateY(-2px);border-color:var(--accent)}
+.stat-label{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-bottom:4px}
+.stat-value{font-size:22px;font-weight:800;line-height:1}
+.stat-unit{font-size:10px;color:var(--muted);margin-top:2px}
+.stat.over .stat-value{color:#ef5350}
+.stat.ok   .stat-value{color:#3fb950}
+
+/* ── AQI scale bar ──────────────────────────────────────────────────────── */
+.scale-bar{height:10px;border-radius:5px;background:linear-gradient(90deg,#00e676,#ffee58,#ffa726,#ef5350,#ab47bc,#c62828);margin:8px 0;position:relative}
+.scale-marker{position:absolute;top:-4px;width:18px;height:18px;border-radius:50%;border:3px solid #fff;transform:translateX(-50%);transition:left .8s cubic-bezier(.34,1.56,.64,1);box-shadow:0 2px 8px rgba(0,0,0,.5)}
+.scale-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:2px}
+
+/* ── Health panel ──────────────────────────────────────────────────────── */
+.health-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)}
+.health-row:last-child{border-bottom:none}
+.health-icon{font-size:22px;width:40px;text-align:center;flex-shrink:0}
+.health-text strong{display:block;font-size:13px;font-weight:700}
+.health-text span{font-size:12px;color:var(--muted)}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase}
+.badge-safe{background:#1a3d1a;color:#3fb950;border:1px solid #2d5a2d}
+.badge-warn{background:#3d2a00;color:#ffa726;border:1px solid #5a3d00}
+.badge-danger{background:#3d1a1a;color:#ef5350;border:1px solid #5a2d2d}
+.badge-info{background:#1a2d3d;color:#58a6ff;border:1px solid #2d4a5a}
+
+/* ── Action list ────────────────────────────────────────────────────────── */
+.action-list{display:flex;flex-direction:column;gap:8px;margin-top:4px}
+.action-item{display:flex;align-items:flex-start;gap:10px;background:var(--surface2);border-radius:8px;padding:10px 12px;font-size:13px;border:1px solid transparent;transition:border-color .2s}
+.action-item:hover{border-color:var(--border)}
+.action-item .icon{font-size:16px;margin-top:1px;flex-shrink:0}
+
+/* ── Forecast legend ────────────────────────────────────────────────────── */
+.forecast-meta{display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap}
+.forecast-meta span{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+
+/* ── Early warning ──────────────────────────────────────────────────────── */
+.alert-box{border-radius:10px;padding:14px 18px;font-size:13px;margin-bottom:14px;display:flex;gap:10px;align-items:flex-start}
+.alert-box.warn{background:#2d1f00;border:1px solid #7a4e00;color:#fbbf24}
+.alert-box.danger{background:#2d0f0f;border:1px solid #7a1f1f;color:#f87171}
+.alert-box.ok{background:#0f2d1a;border:1px solid #1f7a3a;color:#4ade80}
+.alert-icon{font-size:20px;flex-shrink:0}
+
+/* ── Tabs ───────────────────────────────────────────────────────────────── */
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:16px}
+.tab-btn{padding:8px 20px;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;margin-bottom:-1px}
+.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-btn:hover:not(.active){color:var(--text)}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+.tab-list{display:flex;flex-direction:column;gap:8px}
+.tab-list li{background:var(--surface2);border-radius:8px;padding:10px 14px;font-size:13px;list-style:none;border:1px solid var(--border)}
+
+/* ── Awareness post ─────────────────────────────────────────────────────── */
+.post-box{background:#0d1117;border:1px solid var(--border);border-radius:10px;padding:16px;font-family:"Consolas","Courier New",monospace;font-size:13px;line-height:1.8;white-space:pre-wrap;color:#c9d1d9;position:relative}
+.copy-btn{position:absolute;top:10px;right:10px;padding:4px 12px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:6px;font-size:11px;cursor:pointer;transition:all .15s}
+.copy-btn:hover{color:var(--text);border-color:var(--accent)}
+
+/* ── Chat ───────────────────────────────────────────────────────────────── */
+.chat-window{background:var(--surface2);border-radius:10px;padding:16px;min-height:200px;max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:12px;margin-bottom:12px;border:1px solid var(--border)}
+.msg{display:flex;gap:10px;align-items:flex-start;max-width:100%}
+.msg.user{flex-direction:row-reverse}
+.msg-avatar{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;border:1px solid var(--border)}
+.msg.user .msg-avatar{background:#1f3a5f}
+.msg.bot  .msg-avatar{background:#1a3d1a}
+.msg-text{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;font-size:13px;line-height:1.6;max-width:85%}
+.msg.user .msg-text{background:#1c2d3f;border-color:#2d4a5a}
+.msg.bot  .msg-text{background:#1a2d1a;border-color:#2d4a3a}
+.chat-input-row{display:flex;gap:8px}
+.chat-input{flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:13px;outline:none;transition:border-color .2s}
+.chat-input:focus{border-color:var(--accent)}
+.chat-send{padding:10px 20px;background:var(--accent);color:#0d1117;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;transition:opacity .15s}
+.chat-send:hover{opacity:.85}
+.quick-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.chip{padding:5px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:16px;font-size:12px;cursor:pointer;color:var(--muted);transition:all .15s}
+.chip:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ── Welcome screen ─────────────────────────────────────────────────────── */
+.welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;gap:20px;text-align:center;padding:40px}
+.welcome-icon{font-size:72px;animation:float 3s ease-in-out infinite}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+.welcome h2{font-size:28px;font-weight:700;background:linear-gradient(90deg,#58a6ff,#3fb950);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.welcome p{font-size:15px;color:var(--muted);max-width:480px}
+.welcome-arrows{display:flex;flex-direction:column;gap:6px;align-items:center;color:var(--muted);font-size:13px}
+
+/* ── Spinner overlay ────────────────────────────────────────────────────── */
+.spinner-overlay{position:fixed;inset:0;background:rgba(13,17,23,.8);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:999;gap:16px;backdrop-filter:blur(4px)}
+.spinner{width:48px;height:48px;border:4px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner-text{color:var(--accent);font-size:15px;font-weight:600}
+.hidden{display:none!important}
+
+/* ── AQI category colors ─────────────────────────────────────────────────── */
+.c-good{color:var(--good)}.c-satisfactory{color:var(--satisfactory)}
+.c-moderate{color:var(--moderate)}.c-poor{color:var(--poor)}
+.c-verypoor{color:var(--verypoor)}.c-severe{color:var(--severe)}
+
+/* ── Tooltip ─────────────────────────────────────────────────────────────── */
+[data-tip]{position:relative;cursor:help}
+[data-tip]::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#161b22;border:1px solid var(--border);color:var(--text);font-size:11px;padding:6px 10px;border-radius:6px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .2s;z-index:50}
+[data-tip]:hover::after{opacity:1}
+
+/* ── Footer ─────────────────────────────────────────────────────────────── */
+footer{text-align:center;padding:24px;color:var(--muted);font-size:12px;border-top:1px solid var(--border);margin-top:20px}
+</style>
+</head>
+<body>
+
+<!-- Spinner -->
+<div id="spinner" class="spinner-overlay hidden">
+  <div class="spinner"></div>
+  <div class="spinner-text" id="spinnerText">Analyzing air quality…</div>
+</div>
+
+<!-- Header -->
+<header>
+  <div class="header-brand">
+    <img src="https://upload.wikimedia.org/wikipedia/commons/5/51/IBM_logo.svg" alt="IBM"/>
+    <h1>AirAction <span>AI Air Quality Agent</span></h1>
+  </div>
+  <div class="live-badge"><div class="live-dot"></div> IBM Granite · watsonx.ai</div>
+</header>
+
+<!-- Controls -->
+<div class="controls">
+  <div class="ctrl-group">
+    <label>🏙 City</label>
+    <select id="citySelect" style="min-width:150px">
+      <option>Delhi</option><option>Mumbai</option><option>Bangalore</option>
+      <option>Chennai</option><option>Kolkata</option><option>Hyderabad</option>
+      <option>Pune</option><option>Ahmedabad</option><option>Jaipur</option>
+      <option>Lucknow</option><option>New York</option><option>London</option>
+      <option>Beijing</option><option>Tokyo</option><option>Paris</option>
+    </select>
+  </div>
+
+  <div class="ctrl-group">
+    <label>👤 Age Group</label>
+    <div class="radio-pills">
+      <label><input type="radio" name="age" value="adult" checked/><span>Adult</span></label>
+      <label><input type="radio" name="age" value="child"/><span>Child</span></label>
+      <label><input type="radio" name="age" value="elderly"/><span>Elderly</span></label>
+    </div>
+  </div>
+
+  <div class="ctrl-group">
+    <label>🩺 Health Condition</label>
+    <select id="condSelect">
+      <option value="none">No specific condition</option>
+      <option value="asthma">Asthma / Respiratory</option>
+      <option value="heart_disease">Heart Disease</option>
+      <option value="pregnancy">Pregnancy</option>
+      <option value="diabetes">Diabetes</option>
+    </select>
+  </div>
+
+  <button class="btn-analyze" onclick="analyze()">🔍 Analyze Air Quality</button>
+</div>
+
+<!-- Page content -->
+<div class="page" id="page">
+
+  <!-- Welcome state -->
+  <div id="welcome" class="welcome">
+    <div class="welcome-icon">🌬️</div>
+    <h2>Know Your Air. Protect Your Health.</h2>
+    <p>Select your city and profile above, then click <strong>Analyze Air Quality</strong> to get a personalised air quality report with real-time data, forecasts and health recommendations.</p>
+    <div class="welcome-arrows">
+      <span>⬆️ Select city · age group · health condition</span>
+      <span>Then click the blue button →</span>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div id="results" class="hidden">
+
+    <!-- Row 1: AQI + Scale + Stats -->
+    <div class="grid-13">
+      <!-- AQI Big number -->
+      <div class="card" id="cardAQI">
+        <div class="card-title">🌡️ Current AQI</div>
+        <div class="aqi-meter-wrap">
+          <div style="position:relative">
+            <svg viewBox="0 0 200 110" width="200" height="110">
+              <!-- background arc -->
+              <path d="M20,100 A80,80 0 0,1 180,100" fill="none" stroke="#21262d" stroke-width="18" stroke-linecap="round"/>
+              <!-- colored arc -->
+              <path id="aqiArc" d="M20,100 A80,80 0 0,1 180,100" fill="none" stroke="#ffa726" stroke-width="18" stroke-linecap="round" stroke-dasharray="251.2" stroke-dashoffset="251.2" style="transition:stroke-dashoffset .9s cubic-bezier(.34,1.56,.64,1),stroke .5s"/>
+            </svg>
+            <div style="position:absolute;bottom:0;width:200px;text-align:center">
+              <div class="aqi-value" id="aqiNum">—</div>
+              <div class="aqi-cat" id="aqiCat">—</div>
+            </div>
+          </div>
+          <div class="aqi-city" id="aqiCity"></div>
+        </div>
+        <!-- Scale bar -->
+        <div style="margin-top:16px">
+          <div class="scale-bar"><div class="scale-marker" id="scaleMarker" style="left:0%;background:#ffa726"></div></div>
+          <div class="scale-labels"><span>0</span><span>Good</span><span>Moderate</span><span>Poor</span><span>500</span></div>
+        </div>
+        <!-- Caption -->
+        <div style="margin-top:12px;font-size:12px;color:var(--muted);line-height:1.6" id="aqiCaption"></div>
+      </div>
+
+      <!-- Explanation + stats -->
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="card">
+          <div class="card-title">📖 What this means</div>
+          <div id="aqiExplain" style="font-size:14px;line-height:1.8;color:#c9d1d9"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">🧪 Pollutant Levels</div>
+          <div class="stat-grid" id="statGrid"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 2: Pollutant chart + Health advice -->
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title">📊 Pollutant Breakdown vs Safe Limits</div>
+        <div id="pollChart" style="height:280px"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">✅ Health Advisory</div>
+        <div id="healthRows"></div>
+      </div>
+    </div>
+
+    <!-- Row 3: Forecast -->
+    <div class="card">
+      <div class="card-title">📈 72-Hour AQI Forecast</div>
+      <div id="forecastAlert"></div>
+      <div class="forecast-meta">
+        <span><div class="dot" style="background:#58a6ff"></div>Predicted AQI</span>
+        <span><div class="dot" style="background:rgba(88,166,255,.3);border:1px solid #58a6ff"></div>80% Confidence Band</span>
+        <span style="color:#ffa726">— — Poor threshold (200)</span>
+        <span style="color:#ab47bc">— — Very Poor threshold (300)</span>
+      </div>
+      <div id="forecastChart" style="height:320px"></div>
+      <div id="forecastNarrative" style="font-size:13px;color:var(--muted);margin-top:12px;line-height:1.7;padding:12px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)"></div>
+    </div>
+
+    <!-- Row 4: Recommended actions + Community -->
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title">🛡️ Today's Recommended Actions</div>
+        <div id="actionList" class="action-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">🌳 Community &amp; Policy Actions</div>
+        <div class="tabs">
+          <button class="tab-btn active" onclick="switchTab('individual',this)">👤 Individual</button>
+          <button class="tab-btn" onclick="switchTab('community',this)">🏘️ Community</button>
+          <button class="tab-btn" onclick="switchTab('policy',this)">📋 Policy</button>
+        </div>
+        <div id="tab-individual" class="tab-panel active"><ul id="listIndividual" class="tab-list"></ul></div>
+        <div id="tab-community"  class="tab-panel"><ul id="listCommunity"  class="tab-list"></ul></div>
+        <div id="tab-policy"     class="tab-panel"><ul id="listPolicy"     class="tab-list"></ul></div>
+      </div>
+    </div>
+
+    <!-- Row 5: Awareness post + Chat -->
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title">📣 Awareness Post</div>
+        <div style="position:relative">
+          <div id="awarenessPost" class="post-box"></div>
+          <button class="copy-btn" onclick="copyPost()">📋 Copy</button>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin-top:8px">Copy and share on social media to spread awareness.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">💬 Ask AirAction</div>
+        <div class="quick-chips" id="quickChips"></div>
+        <div id="chatWindow" class="chat-window"></div>
+        <div class="chat-input-row">
+          <input id="chatInput" class="chat-input" placeholder="e.g. Should I go outside today?" onkeydown="if(event.key==='Enter')sendChat()"/>
+          <button class="chat-send" onclick="sendChat()">Send ➤</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /results -->
+</div><!-- /page -->
+
+<footer>
+  ⚠️ Informational only — not a substitute for professional medical advice. &nbsp;|&nbsp;
+  Data: Sample / Demo mode &nbsp;|&nbsp; Powered by <strong>IBM Granite · watsonx.ai</strong>
+</footer>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════════
+   DATA LAYER
+══════════════════════════════════════════════════════════════════════════ */
+const CITY_AQI = {
+  "Delhi":187,"Mumbai":120,"Bangalore":85,"Chennai":95,"Kolkata":160,
+  "Hyderabad":105,"Pune":90,"Ahmedabad":145,"Jaipur":130,"Lucknow":175,
+  "New York":42,"London":35,"Beijing":220,"Tokyo":55,"Paris":48
+};
+const CAT_COLORS = {
+  "Good":"#00e676","Satisfactory":"#ffee58","Moderate":"#ffa726",
+  "Poor":"#ef5350","Very Poor":"#ab47bc","Severe":"#c62828"
+};
+const SAFE = {pm25:12,pm10:54,no2:40,o3:100,co:100,so2:40}; // safe limits (co scaled ×10)
+
+function rng(seed){
+  let s=[...seed].reduce((a,c)=>a+c.charCodeAt(0),0)*9301+49297;
+  return()=>{s=(s*9301+49297)%233280;return s/233280};
+}
+function cat(v){
+  if(v<=50)return"Good";if(v<=100)return"Satisfactory";
+  if(v<=200)return"Moderate";if(v<=300)return"Poor";
+  if(v<=400)return"Very Poor";return"Severe";
+}
+function clsFor(c){return"c-"+c.toLowerCase().replace(" ","")}
+
+let D = null; // current data
+
+function buildData(city,age,cond){
+  const base=CITY_AQI[city]||100;
+  const r=rng(city);
+  const sc=base/187;
+  const raw={pm25:89.4,pm10:142,no2:67.3,o3:38.1,co:1.2,so2:22};
+  const p={pm25:+(raw.pm25*sc).toFixed(1),pm10:+(raw.pm10*sc).toFixed(1),
+            no2:+(raw.no2*sc).toFixed(1),o3:+(raw.o3*sc).toFixed(1),
+            co:+(raw.co*sc).toFixed(2),so2:+(raw.so2*sc).toFixed(1)};
+  const dom=Object.entries(p).reduce((a,b)=>b[1]>a[1]?b:a)[0].toUpperCase();
+  const category=cat(base);
+  const color=CAT_COLORS[category];
+
+  const explanations={
+    "Good":"The air quality is excellent. It is safe for everyone to be outdoors freely. Enjoy the fresh air — ideal for jogging, cycling, or any outdoor activity today.",
+    "Satisfactory":"Air quality is acceptable for most people. Unusually sensitive individuals may notice mild discomfort during prolonged outdoor activity.",
+    "Moderate":`Air quality is moderate. ${dom} is the dominant pollutant today. People with respiratory conditions should limit prolonged outdoor exertion. The general public is unlikely to be affected.`,
+    "Poor":`Air quality is poor, driven by elevated ${dom}. Sensitive groups — children, elderly, and those with respiratory or heart conditions — should avoid outdoor activities. General public may experience irritation.`,
+    "Very Poor":`Very poor air quality. ${dom} is well above safe limits. Everyone should minimise time outdoors. Wear an N95 mask if going out. Use air purifiers indoors.`,
+    "Severe":`🚨 Severe air quality emergency. ${dom} at hazardous levels. Stay indoors, seal windows, run HEPA air purifier at max. Seek medical help if breathing difficulty occurs.`
+  };
+
+  const outdoorSafe=base<=100;
+  const maskType2=base<=50?"Not required":base<=100?"Surgical mask recommended":base<=200?"N95 / P100 mask recommended":"N95 mask mandatory";
+  const maskEmoji=base<=50?"🟢":base<=100?"🟡":"🔴";
+
+  const actions={
+    "Good":        [["✅","Enjoy all outdoor activities freely."],["🌳","Great day for a walk, jog, or cycling."],["🪟","Open windows for natural ventilation."]],
+    "Satisfactory":[["😷","Sensitive individuals carry a mask."],["⏱️","Limit prolonged strenuous outdoor activity."],["🪟","Ventilate home in the early morning."]],
+    "Moderate":    [["😷","Wear a surgical mask when outdoors."],["🏃","Avoid heavy exercise outside today."],["🏠","Keep windows closed during peak traffic hours."],["💧","Stay well hydrated throughout the day."]],
+    "Poor":        [["😷","Wear N95 mask at all times outdoors."],["🚫","No outdoor exercise today — reschedule."],["🏠","Stay indoors as much as possible."],["🌬️","Run an air purifier at home."],["👁️","Avoid eye irritants; wear glasses if outdoors."]],
+    "Very Poor":   [["🚨","Avoid all outdoor exposure today."],["😷","N95 mask is mandatory if going out."],["🏠","Seal door and window gaps with wet cloth."],["🌬️","Run air purifier continuously on max."],["💊","Asthma patients: keep inhaler readily accessible."]],
+    "Severe":      [["🚨","STAY INDOORS — Air quality emergency."],["😷","Double-mask (N95 + surgical) if forced out."],["🌬️","HEPA air purifier at maximum setting."],["🏥","Seek medical attention if breathing difficulty."],["📵","Cancel all non-essential outdoor activities."]]
+  };
+
+  // Forecast
+  const now=new Date();now.setMinutes(0,0,0);
+  const trend=Math.floor(r()*3)-1;
+  const pts=Array.from({length:13},(_,i)=>{
+    const dt=new Date(now.getTime()+i*6*3600*1000);
+    const label=dt.toLocaleDateString("en-IN",{month:"short",day:"numeric"})+" "+dt.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
+    const noise=Math.round((r()-.5)*40);
+    const v=Math.max(5,base+noise+trend*i*4);
+    return{label,aqi:v,lo:Math.max(0,v-25),hi:v+25};
+  });
+  const peak=pts.reduce((a,b)=>b.aqi>a.aqi?b:a);
+  const ew=peak.aqi>=300;
+  const trendW=trend>0?"worsening":trend<0?"improving":"stable";
+
+  const indMap={
+    "Good":        ["🚶 Walk or cycle instead of driving.","🌿 Plant trees or support green initiatives.","♻️ Recycle and reduce waste today."],
+    "Satisfactory":["🚌 Use public transport wherever possible.","🛵 Avoid idling your vehicle.","🌱 Support local clean-air campaigns."],
+    "Moderate":    ["🚗 Carpool or use metro today.","🔥 Avoid burning waste or firewood.","🌬️ Check indoor air quality with a sensor."],
+    "Poor":        ["🏠 Work from home if possible.","⛽ Avoid refuelling your car today.","📱 Report visible pollution to city helpline."],
+    "Very Poor":   ["🚷 Avoid all unnecessary travel.","🔌 Switch to electric or gas-based cooking.","📣 Alert neighbours — especially elderly and children."],
+    "Severe":      ["🏥 Check on vulnerable neighbours immediately.","🚑 Keep emergency contacts ready.","📢 Share AQI alerts on social media now."]
+  };
+
+  return{
+    city,age,cond,base,category,color,dominant:dom,p,
+    outdoorSafe,maskType:maskType2,
+    explanation:explanations[category],
+    actions:actions[category],
+    pts,peak,ew,
+    forecast:`Over the next 72 hours, ${city} is forecast to experience ${trendW} air quality. Peak AQI of ${peak.aqi} is expected around ${peak.label}. `+(ew?"⚠️ An early warning is in effect — plan indoor activities and prepare your air purifier.":"No severe episode is anticipated. Stay updated via your local weather service."),
+    individual:indMap[category],
+    community:["🏫 Schools should shift PE / sports classes indoors.","🏗️ Construction sites must halt dust-generating work.","🌳 Increase urban tree-cover in high-pollution corridors.","🚦 Implement odd-even vehicle rationing scheme."],
+    policy:["📋 Enforce stricter vehicular emission norms (BS-VI+).","🏭 Monitor industrial stack emissions in real time.","☀️ Accelerate transition to renewable energy sources.","🚇 Invest in metro / BRT network expansion for last-mile."],
+    post:`🌍 Air quality in ${city} is ${category} today (AQI ${base}).\nDominant pollutant: ${dom}.\n${base>150?"⚠️ Stay indoors and protect yourself! 😷":"🌿 Take care outdoors today!"}\n\nStay informed. Stay safe.\n#AirAction #AQI #CleanAir #IBMGranite #${city.replace(" ","")}`,
+  };
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   RENDER
+══════════════════════════════════════════════════════════════════════════ */
+function renderAQI(d){
+  const ARC_LEN=251.2;
+  const pct=Math.min(d.base/500,1);
+  const offset=ARC_LEN-(pct*ARC_LEN);
+  const arc=document.getElementById("aqiArc");
+  arc.style.strokeDashoffset=ARC_LEN; // reset
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    arc.style.strokeDashoffset=offset;
+    arc.style.stroke=d.color;
+  }));
+  document.getElementById("aqiNum").textContent=d.base;
+  document.getElementById("aqiNum").className="aqi-value "+clsFor(d.category);
+  document.getElementById("aqiCat").textContent=d.category;
+  document.getElementById("aqiCat").className="aqi-cat "+clsFor(d.category);
+  document.getElementById("aqiCity").textContent="📍 "+d.city+" Central Monitoring Station";
+  document.getElementById("scaleMarker").style.left=(pct*100)+"%";
+  document.getElementById("scaleMarker").style.background=d.color;
+  document.getElementById("aqiCaption").innerHTML=
+    `<b>Dominant pollutant:</b> ${d.dominant} &nbsp;·&nbsp; <b>Source:</b> Sample / Demo mode &nbsp;·&nbsp; <b>Updated:</b> ${new Date().toLocaleTimeString()}`;
+  document.getElementById("aqiExplain").textContent=d.explanation;
+}
+
+function renderStats(d){
+  const pScaled={pm25:d.p.pm25,pm10:d.p.pm10,no2:d.p.no2,o3:d.p.o3,co:+(d.p.co*10).toFixed(1),so2:d.p.so2};
+  const labels={"pm25":"PM2.5","pm10":"PM10","no2":"NO₂","o3":"O₃","co":"CO","so2":"SO₂"};
+  const units={"pm25":"µg/m³","pm10":"µg/m³","no2":"µg/m³","o3":"µg/m³","co":"×10 mg/m³","so2":"µg/m³"};
+  document.getElementById("statGrid").innerHTML=Object.keys(labels).map(k=>{
+    const v=pScaled[k],lim=SAFE[k],over=v>lim;
+    return`<div class="stat ${over?"over":"ok"}" data-tip="${over?"⚠️ Exceeds safe limit ("+lim+")":"✅ Within safe limit ("+lim+")"}">
+      <div class="stat-label">${labels[k]}</div>
+      <div class="stat-value">${v}</div>
+      <div class="stat-unit">${units[k]}</div>
+    </div>`;
+  }).join("");
+}
+
+function renderPollChart(d){
+  const labels=["PM2.5","PM10","NO₂","O₃","CO ×10","SO₂"];
+  const vals=[d.p.pm25,d.p.pm10,d.p.no2,d.p.o3,+(d.p.co*10).toFixed(1),d.p.so2];
+  const safe=[12,54,40,100,100,40];
+  const colors=vals.map((v,i)=>v>safe[i]?"#ef5350":"#3fb950");
+  Plotly.newPlot("pollChart",[
+    {type:"bar",x:labels,y:vals,marker:{color:colors,opacity:.85},name:"Current",text:vals.map(v=>v.toFixed(1)),textposition:"outside",textfont:{color:"#e6edf3",size:11}},
+    {type:"scatter",x:labels,y:safe,mode:"lines+markers",name:"Safe Limit",line:{color:"#8b949e",dash:"dash",width:1.5},marker:{color:"#8b949e",size:6}},
+  ],{
+    height:280,margin:{l:36,r:10,t:16,b:40},
+    paper_bgcolor:"rgba(0,0,0,0)",plot_bgcolor:"rgba(0,0,0,0)",
+    font:{color:"#8b949e",size:11},
+    xaxis:{gridcolor:"#21262d",tickfont:{color:"#c9d1d9"}},
+    yaxis:{gridcolor:"#21262d",title:{text:"Concentration",font:{color:"#8b949e"}}},
+    legend:{font:{color:"#c9d1d9"},bgcolor:"rgba(0,0,0,0)"},
+    bargap:0.4,
+  },{displayModeBar:false,responsive:true});
+}
+
+function renderHealth(d){
+  const isHighRisk=d.age!=="adult"||d.cond!=="none";
+  const rows=[
+    {icon:"🏃",label:"Outdoor Activity",val:d.outdoorSafe?"✅ Safe with precautions":"🚫 Not recommended",badge:d.outdoorSafe?"badge-safe":"badge-danger",tip:d.outdoorSafe?"Light activity is fine, carry a mask":"Avoid outdoor exposure today"},
+    {icon:"😷",label:"Mask Type",val:d.maskType,badge:d.base<=50?"badge-safe":d.base<=100?"badge-info":"badge-warn"},
+    {icon:"🏥",label:"Risk Level",val:isHighRisk?"HIGH — Take extra precautions":"MODERATE — General measures","badge":isHighRisk?"badge-danger":"badge-warn"},
+    {icon:"🌡️",label:"AQI Category",val:d.category,badge:d.base<=50?"badge-safe":d.base<=100?"badge-info":d.base<=200?"badge-warn":"badge-danger"},
+  ];
+  document.getElementById("healthRows").innerHTML=rows.map(r=>`
+    <div class="health-row">
+      <div class="health-icon">${r.icon}</div>
+      <div class="health-text">
+        <strong>${r.label}</strong>
+        <span><span class="badge ${r.badge}">${r.val}</span></span>
+      </div>
+    </div>`).join("");
+}
+
+function renderForecast(d){
+  const dts=d.pts.map(p=>p.label);
+  const aqis=d.pts.map(p=>p.aqi);
+  const los=d.pts.map(p=>p.lo);
+  const his=d.pts.map(p=>p.hi);
+  Plotly.newPlot("forecastChart",[
+    {type:"scatter",x:[...dts,...dts.slice().reverse()],y:[...his,...los.slice().reverse()],fill:"toself",fillcolor:"rgba(88,166,255,.12)",line:{color:"rgba(255,255,255,0)"},name:"80% Band",showlegend:false},
+    {type:"scatter",x:dts,y:aqis,mode:"lines+markers",name:"Predicted AQI",line:{color:"#58a6ff",width:2.5},marker:{color:"#58a6ff",size:5}},
+  ],{
+    height:320,margin:{l:40,r:50,t:10,b:70},
+    paper_bgcolor:"rgba(0,0,0,0)",plot_bgcolor:"rgba(0,0,0,0)",
+    font:{color:"#8b949e",size:11},
+    xaxis:{gridcolor:"#21262d",tickangle:-35,tickfont:{color:"#c9d1d9"}},
+    yaxis:{gridcolor:"#21262d",title:{text:"AQI",font:{color:"#8b949e"}}},
+    shapes:[
+      {type:"line",x0:dts[0],x1:dts[12],y0:200,y1:200,line:{color:"#ffa726",dash:"dot",width:1.5}},
+      {type:"line",x0:dts[0],x1:dts[12],y0:300,y1:300,line:{color:"#ab47bc",dash:"dot",width:1.5}},
+    ],
+    annotations:[
+      {x:dts[12],y:200,xanchor:"right",yanchor:"bottom",text:"Poor",showarrow:false,font:{color:"#ffa726",size:10}},
+      {x:dts[12],y:300,xanchor:"right",yanchor:"bottom",text:"Very Poor",showarrow:false,font:{color:"#ab47bc",size:10}},
+    ],
+    legend:{font:{color:"#c9d1d9"},bgcolor:"rgba(0,0,0,0)"},
+  },{displayModeBar:false,responsive:true});
+
+  const fa=document.getElementById("forecastAlert");
+  if(d.ew){
+    fa.innerHTML=`<div class="alert-box danger"><div class="alert-icon">🚨</div><div><strong>Early Warning:</strong> Peak AQI of <strong>${d.peak.aqi}</strong> expected around <strong>${d.peak.label}</strong>. Plan ahead — use air purifier tonight and adjust your morning commute.</div></div>`;
+  } else {
+    fa.innerHTML=`<div class="alert-box ok"><div class="alert-icon">✅</div><div><strong>All Clear:</strong> No severe air quality episode expected in the next 72 hours.</div></div>`;
+  }
+  document.getElementById("forecastNarrative").textContent=d.forecast;
+}
+
+function renderActions(d){
+  document.getElementById("actionList").innerHTML=d.actions.map(([ic,tx])=>`
+    <div class="action-item"><div class="icon">${ic}</div><div>${tx}</div></div>`).join("");
+}
+
+function renderCommunity(d){
+  document.getElementById("listIndividual").innerHTML=d.individual.map(a=>`<li>${a}</li>`).join("");
+  document.getElementById("listCommunity").innerHTML=d.community.map(a=>`<li>${a}</li>`).join("");
+  document.getElementById("listPolicy").innerHTML=d.policy.map(a=>`<li>${a}</li>`).join("");
+  document.getElementById("awarenessPost").textContent=d.post;
+}
+
+function renderChat(d){
+  document.getElementById("chatWindow").innerHTML="";
+  const chips=["Should I go outside?","What mask should I wear?","Show me the forecast","What are the pollutants?","What actions should I take?"];
+  document.getElementById("quickChips").innerHTML=chips.map(c=>`<button class="chip" onclick="quickAsk('${c}')">${c}</button>`).join("");
+  appendMsg("bot",`Hi! I'm AirAction 🌬️  AQI in <b>${d.city}</b> is <b>${d.base}</b> (${d.category}). Ask me anything about today's air quality!`);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MAIN
+══════════════════════════════════════════════════════════════════════════ */
+function analyze(){
+  const city=document.getElementById("citySelect").value;
+  const age=document.querySelector('input[name="age"]:checked').value;
+  const cond=document.getElementById("condSelect").value;
+
+  document.getElementById("spinner").classList.remove("hidden");
+  document.getElementById("spinnerText").textContent=`Analyzing air quality for ${city}…`;
+
+  setTimeout(()=>{
+    D=buildData(city,age,cond);
+    document.getElementById("welcome").classList.add("hidden");
+    document.getElementById("results").classList.remove("hidden");
+
+    // Reset tab
+    document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach(p=>p.classList.remove("active"));
+    document.querySelector(".tab-btn").classList.add("active");
+    document.getElementById("tab-individual").classList.add("active");
+
+    renderAQI(D);
+    renderStats(D);
+    renderPollChart(D);
+    renderHealth(D);
+    renderForecast(D);
+    renderActions(D);
+    renderCommunity(D);
+    renderChat(D);
+
+    document.getElementById("spinner").classList.add("hidden");
+    document.getElementById("results").scrollIntoView({behavior:"smooth",block:"start"});
+  },500);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   UI HELPERS
+══════════════════════════════════════════════════════════════════════════ */
+function switchTab(name,btn){
+  document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"));
+  document.querySelectorAll(".tab-panel").forEach(p=>p.classList.remove("active"));
+  btn.classList.add("active");
+  document.getElementById("tab-"+name).classList.add("active");
+}
+function copyPost(){
+  navigator.clipboard.writeText(document.getElementById("awarenessPost").textContent)
+    .then(()=>{const b=event.target;b.textContent="✅ Copied!";setTimeout(()=>b.textContent="📋 Copy",2000);});
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CHAT
+══════════════════════════════════════════════════════════════════════════ */
+function quickAsk(q){document.getElementById("chatInput").value=q;sendChat();}
+function sendChat(){
+  const inp=document.getElementById("chatInput");
+  const q=inp.value.trim();
+  if(!q||!D)return;
+  inp.value="";
+  appendMsg("user",q);
+  setTimeout(()=>appendMsg("bot",localReply(q,D)),350);
+}
+function appendMsg(role,html){
+  const w=document.getElementById("chatWindow");
+  const d=document.createElement("div");
+  d.className="msg "+role;
+  d.innerHTML=`<div class="msg-avatar">${role==="user"?"👤":"🤖"}</div><div class="msg-text">${html}</div>`;
+  w.appendChild(d);
+  w.scrollTop=w.scrollHeight;
+}
+function localReply(q,d){
+  const ql=q.toLowerCase();
+  if(/aqi|air quality|index|pollution level/.test(ql))
+    return`The current AQI in <b>${d.city}</b> is <b>${d.base}</b> (${d.category}). ${d.explanation}`;
+  if(/mask|wear/.test(ql))
+    return`For today's conditions in ${d.city}: <b>${d.maskType}</b>. ${d.base>150?"Wear it at all times outdoors.":"Carry one just in case."}`;
+  if(/outdoor|outside|go out|exercise|walk|run|jog|sport/.test(ql))
+    return d.outdoorSafe
+      ?`Going outdoors is <b>generally safe</b> today (AQI ${d.base}, ${d.category}). Stick to light activity and carry a mask just in case.`
+      :`Going outdoors is <b>not recommended</b> today (AQI ${d.base}, ${d.category}). Minimise exposure and wear an N95 mask if you must go out.`;
+  if(/forecast|tomorrow|next|72|predict|week/.test(ql))
+    return`<b>72-Hour Forecast:</b> Peak AQI of <b>${d.peak.aqi}</b> expected around <b>${d.peak.label}</b>. ${d.forecast}`;
+  if(/pm2|pm10|no2|ozone|so2|\bco\b|pollutant|chemical|particle/.test(ql))
+    return`<b>Current pollutant levels in ${d.city}:</b><br>
+      • PM2.5: <b>${d.p.pm25} µg/m³</b> (safe: 12)<br>
+      • PM10: <b>${d.p.pm10} µg/m³</b> (safe: 54)<br>
+      • NO₂: <b>${d.p.no2} µg/m³</b> (safe: 40)<br>
+      • O₃: <b>${d.p.o3} µg/m³</b> (safe: 100)<br>
+      • CO: <b>${d.p.co} mg/m³</b><br>
+      • SO₂: <b>${d.p.so2} µg/m³</b><br>
+      Dominant: <b>${d.dominant}</b>`;
+  if(/action|what should|protect|precaution|tip|advice/.test(ql))
+    return`<b>Today's top actions for ${d.city}:</b><br>`+d.actions.map(([ic,tx])=>`${ic} ${tx}`).join("<br>");
+  if(/child|kid|baby|infant/.test(ql))
+    return`Children are in a high-risk group for air pollution. AQI is ${d.base} (${d.category}) in ${d.city}. ${d.base>100?"Keep children indoors, ensure air purifier is running, and avoid any outdoor play today.":"Light outdoor play is okay — limit duration and avoid heavy exertion."}`;
+  if(/elder|old|senior|aged/.test(ql))
+    return`Elderly individuals are highly sensitive to air pollution. With AQI at ${d.base} (${d.category}), ${d.base>100?"they should strictly stay indoors, use prescribed medication, and avoid any strenuous activity.":"light outdoor activity is acceptable — avoid peak traffic hours."}`;
+  if(/asthma|respiratory|lung|inhaler/.test(ql))
+    return`People with asthma must be extra cautious. AQI ${d.base} (${d.category}) in ${d.city}. ${d.base>100?"Keep rescue inhaler handy, avoid all outdoor activity, and run an air purifier indoors.":"Use preventive medication as prescribed and carry your inhaler outdoors."}`;
+  if(/heart|cardiac|cardio/.test(ql))
+    return`Air pollution significantly stresses the cardiovascular system. With AQI at ${d.base} (${d.category}), ${d.base>100?"people with heart conditions should avoid outdoor exposure, stay hydrated, and consult their doctor if symptoms arise.":"moderate activity is okay — avoid peak pollution hours (morning and evening rush)."}`;
+  if(/window|door|ventilat|purifier|indoor|inside/.test(ql))
+    return d.base>100
+      ?`Indoors, keep windows and doors closed during peak pollution hours. Run a HEPA air purifier continuously. Avoid cooking with high smoke. AQI is ${d.base} — indoor air quality matters today.`
+      :`Natural ventilation is fine today (AQI ${d.base}). Open windows in the morning for fresh air.`;
+  if(/awareness|post|share|social|tweet/.test(ql))
+    return`Here's a ready-to-share awareness post for ${d.city}:<br><br><code style="font-size:12px;line-height:1.7">${d.post.replace(/\n/g,"<br>")}</code>`;
+  return`I'm AirAction, your AI air quality assistant 🌬️<br>AQI in <b>${d.city}</b> is <b>${d.base}</b> (${d.category}).<br><br>You can ask me about:<br>• Air quality & pollutants<br>• Mask recommendations<br>• Outdoor activity safety<br>• 72-hour forecast<br>• Tips for asthma, heart disease, children, elderly`;
+}
+</script>
+</body>
+</html>

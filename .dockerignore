@@ -1,0 +1,10 @@
+# .dockerignore
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.env
+.git/
+.venv/
+chroma_db/
+*.log

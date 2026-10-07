@@ -1,0 +1,63 @@
+# IBM Cloud deployment manifest for Code Engine
+# Deploy with:
+#   ibmcloud ce application create --name airaction-api \
+#     --image <YOUR_REGISTRY>/airaction:latest \
+#     --port 8000 \
+#     --env-from-secret airaction-secrets \
+#     --min-scale 1 --max-scale 5
+#
+# See README.md §  IBM Cloud Deployment for full step-by-step instructions.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: airaction
+  namespace: default
+  annotations:
+    serving.knative.dev/creator: airaction-team
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "5"
+    spec:
+      containerConcurrency: 10
+      containers:
+        - image: <YOUR_REGISTRY>/airaction:latest
+          ports:
+            - containerPort: 8000
+              name: h2c
+            - containerPort: 8501
+          env:
+            - name: WATSONX_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airaction-secrets
+                  key: WATSONX_API_KEY
+            - name: WATSONX_PROJECT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: airaction-secrets
+                  key: WATSONX_PROJECT_ID
+            - name: WAQI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airaction-secrets
+                  key: WAQI_API_KEY
+            - name: CHROMA_DB_PATH
+              value: /app/chroma_db
+            - name: USE_SAMPLE_DATA
+              value: "false"
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2"
+          volumeMounts:
+            - name: chroma-storage
+              mountPath: /app/chroma_db
+      volumes:
+        - name: chroma-storage
+          emptyDir: {}
